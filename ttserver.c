@@ -79,6 +79,7 @@ int main(int argc, const char* argv[]) {
 				json_object_object_get_ex(quote, "text", &quote);
 				const char *str_quote = json_object_get_string(quote);
 				for (int i = 0; i < FD_SETSIZE; i++) {
+					states[i].pos = 0;
 					if (!(i != 0 && i != sockfd && FD_ISSET(i, &set))) {
 						continue;
 					}
