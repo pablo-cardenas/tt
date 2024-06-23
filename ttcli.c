@@ -12,9 +12,9 @@
 
 #define AHEAD_SHOW 4
 #define AHEAD_HIDE 2
-#define WAIT_TIME 3000000000
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-#define MIN(a, b) ((a) > (b) ? (a) : (b))
+#define WAIT_TIME 2000000000
+#define MAX(a, b) ((a) < (b) ? (b) : (a))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 void backspace(
 	int *const pos,
@@ -41,10 +41,11 @@ void print_text(
 	WINDOW *win,
 	int pos,
 	int error,
-	int count_errors, 
+	int count_errors,
+	int count_slows,
 	struct timespec last_back,
 	struct timespec last_input,
-	struct timespec start_time,
+	struct timespec first_input,
 	struct state *state_players,
 	char num_players,
 	char const *text,
@@ -54,15 +55,14 @@ void print_text(
 	short num_spaces)
 {
 	wclear(win);
-	if (pos >= length) {
-		float elapsed = (last_input.tv_sec - start_time.tv_sec) + (last_input.tv_nsec - start_time.tv_nsec) / 1000000000.0;
+	float elapsed =
+		(last_input.tv_sec - first_input.tv_sec) +
+		(last_input.tv_nsec - first_input.tv_nsec) / 1000000000.0;
 
-		mvwprintw(win, 5, 24, "WPM: %.2f", (float) (length / 5) / (elapsed / 60));
-		mvwprintw(win, 6, 24, "Errors: %2d", count_errors);
-		mvwprintw(win, 7, 15, "Waiting text from server...");
-		wrefresh(win);
-		return;
-	}
+	mvwprintw(win,  9, 24, "   WPM: %.0f",(pos / 5.0) / (elapsed / 60.0));
+	mvwprintw(win, 10, 24, "Errors: %d", count_errors);
+	mvwprintw(win, 11, 24, " Slows: %d", count_slows);
+	wrefresh(win);
 
 	struct timespec current;
 	clock_gettime(CLOCK_REALTIME, &current);
@@ -74,61 +74,83 @@ void print_text(
 
 	unsigned short current_word = pos_to_word[pos];
 
-	int space_start = current_word + AHEAD_HIDE < num_spaces
-				  ? current_word + AHEAD_HIDE
-				  : num_spaces - 1;
-	int space_end = current_word + AHEAD_SHOW < num_spaces
-				? current_word + AHEAD_SHOW
-				: num_spaces - 1;
-	int start = spaces[space_start];
-	int end = spaces[space_end];
+	int space_start = MIN(current_word + AHEAD_HIDE, num_spaces - 1);
+	int space_end = MIN(current_word + AHEAD_SHOW, num_spaces - 1);
 
 	wmove(win, 0, 0);
-	wattron(win, A_DIM);
-	for (int i = 0; i < MAX(spaces[current_word], 0); i++) {
-		wprintw(win, "%c", text[i]);
-	}
-	wattroff(win, A_DIM);
-	for (int i = MAX(spaces[current_word], 0); i < start; i++) {
-		if (error) {
-			wattron(win, COLOR_PAIR(2));
+	for (int i = 0; i < length; i++) {
+		if (pos >= length) {
 			wprintw(win, "%c", text[i]);
-			wattroff(win, COLOR_PAIR(2));
-		} else if (diff_back < WAIT_TIME) {
+		} else if (i < spaces[current_word]) {
+			wattron(win, A_DIM);
+			wprintw(win, "%c", text[i]);
+			wattroff(win, A_DIM);
+		} else if (i < spaces[space_start]) {
+			if (error) {
+				wattron(win, COLOR_PAIR(2));
+				wprintw(win, "%c", text[i]);
+				wattroff(win, COLOR_PAIR(2));
+			} else if (diff_back < WAIT_TIME) {
+				wattron(win, A_BOLD);
+				wattron(win, COLOR_PAIR(1));
+				wprintw(win, "%c", text[i]);
+				wattroff(win, COLOR_PAIR(1));
+				wattroff(win, A_BOLD);
+			} else if (diff_input < WAIT_TIME) {
+				if (isalpha(text[i])) {
+					wprintw(win, " ");
+				} else {
+					wprintw(win, "%c", text[i]);
+				}
+			} else {
+				/* wattron(win, A_BOLD); */
+				wprintw(win, "%c", text[i]);
+				/* wattroff(win, A_BOLD); */
+			}
+		} else if (i < spaces[space_end]) {
 			wattron(win, A_BOLD);
-			wattron(win, COLOR_PAIR(1));
 			wprintw(win, "%c", text[i]);
-			wattroff(win, COLOR_PAIR(1));
 			wattroff(win, A_BOLD);
-		} else if (diff_input < WAIT_TIME) {
-			wprintw(win, " ");
 		} else {
-			/* wattron(win, A_BOLD); */
 			wprintw(win, "%c", text[i]);
-			/* wattroff(win, A_BOLD); */
 		}
-	}
-	wattron(win, A_BOLD);
-	for (int i = start; i < end; i++) {
-		wprintw(win, "%c", text[i]);
-	}
-	wattroff(win, A_BOLD);
-	for (int i = end; i < length; i++) {
-		wprintw(win, "%c", text[i]);
 	}
 
-	for (int i = 0; i < num_players; i++) {
-		wattron(win, COLOR_PAIR(2));
-		int state_pos = state_players[i].pos;
-		if (state_pos >= 0) {
-			mvwprintw(
-				win,
-				state_pos / 58,
-				state_pos % 58,
-				"%c",
-				text[state_pos]);
+	for (int i_player = 0; i_player < num_players; i_player++) {
+		int i = state_players[i_player].pos;
+
+		int y = i / 58;
+		int x = i % 58;
+
+		wattron(win, COLOR_PAIR(3));
+		if (i < spaces[current_word]) {
+			wattron(win, A_DIM);
+			mvwprintw(win, y, x, "%c", text[i]);
+			wattroff(win, A_DIM);
+		} else if (i < spaces[space_start]) {
+			if (error) {
+				wattron(win, COLOR_PAIR(4));
+				mvwprintw(win, y, x, "%c", text[i]);
+				wattroff(win, COLOR_PAIR(4));
+			} else if (diff_back < WAIT_TIME) {
+				wattron(win, A_BOLD);
+				mvwprintw(win, y, x, "%c", text[i]);
+				wattroff(win, A_BOLD);
+			} else if (diff_input < WAIT_TIME) {
+				mvwprintw(win, y, x, "_");
+			} else {
+				/* wattron(win, A_BOLD); */
+				mvwprintw(win, y, x, "%c", text[i]);
+				/* wattroff(win, A_BOLD); */
+			}
+		} else if (i < spaces[space_end]) {
+			wattron(win, A_BOLD);
+			mvwprintw(win, y, x, "%c", text[i]);
+			wattroff(win, A_BOLD);
+		} else {
+			mvwprintw(win, y, x, "%c", text[i]);
 		}
-		wattroff(win, COLOR_PAIR(2));
+		wattroff(win, COLOR_PAIR(3));
 	}
 
 	if (error) {
@@ -174,7 +196,7 @@ int main(int argc, const char *argv[])
 	if (status == -1) {
 		perror("connect");
 		endwin();
-		exit(1);
+		return 1;
 	}
 
 	initscr();
@@ -183,6 +205,8 @@ int main(int argc, const char *argv[])
 	noecho();
 	init_pair(1, COLOR_RED, -1);
 	init_pair(2, -1, COLOR_RED);
+	init_pair(3, COLOR_CYAN, -1);
+	init_pair(4, COLOR_CYAN, COLOR_RED);
 
 	WINDOW *boxwin = newwin(15, 60, (LINES - 15) / 2, (COLS - 60) / 2);
 	WINDOW *win = subwin(
@@ -192,7 +216,6 @@ int main(int argc, const char *argv[])
 	box(boxwin, 0, 0);
 	refresh();
 	wrefresh(boxwin);
-
 
 	struct state state_players[16];
 	char num_players = 0;
@@ -208,6 +231,7 @@ int main(int argc, const char *argv[])
 	int pos;
 	int error;
 	int count_errors = 0;
+	int count_slows = 0;
 
 	char text[4096];
 	int length;
@@ -218,11 +242,7 @@ int main(int argc, const char *argv[])
 
 	struct timespec last_back = {0, 0};
 	struct timespec last_input = {0, 0};
-	struct timespec start_time;
-
-	int count_read_stdin = 0;
-	int count_read_sockfd = 0;
-	int count_write_sockfd = 0;
+	struct timespec first_input = {0, 0};
 
 	while (1) {
 		fd_set readfds, writefds;
@@ -238,6 +258,10 @@ int main(int argc, const char *argv[])
 		select(FD_SETSIZE, &readfds, &writefds, NULL, &select_timeout);
 
 		if (FD_ISSET(0, &readfds)) {
+			if (first_input.tv_sec == 0 && first_input.tv_nsec == 0) {
+				clock_gettime(CLOCK_REALTIME, &first_input);
+			}
+
 			int c = getch();
 
 			if (c == ERR) {
@@ -265,16 +289,21 @@ int main(int argc, const char *argv[])
 			} else {
 				struct timespec current;
 				clock_gettime(CLOCK_REALTIME, &current);
-				long diff =
+				long diff_back =
 					(current.tv_sec - last_back.tv_sec) *
 						1000000000 +
 					current.tv_nsec - last_back.tv_nsec;
+				long diff_input =
+					(current.tv_sec - last_input.tv_sec) *
+						1000000000 +
+					current.tv_nsec - last_input.tv_nsec;
 
-				if (!error && diff > WAIT_TIME) {
+				if (pos < length && !error && diff_back > WAIT_TIME) {
 					if (c == text[pos]) {
-						clock_gettime(
-							CLOCK_REALTIME,
-							&last_input);
+						if (pos != 0 && diff_input > WAIT_TIME) {
+							count_slows++;
+						}
+						last_input = current;
 						pos++;
 						outdated = 1;
 					} else {
@@ -289,10 +318,11 @@ int main(int argc, const char *argv[])
 			if (recv_step == 0) {
 				memset(&last_back, 0, sizeof last_back);
 				memset(&last_input, 0, sizeof last_input);
-				clock_gettime(CLOCK_REALTIME, &start_time);
+				memset(&first_input, 0, sizeof first_input);
 
 				error = 0;
 				count_errors = 0;
+				count_slows = 0;
 
 				length = recv(sockfd, text, 4096, 0);
 				if (length == 0) {
@@ -317,7 +347,8 @@ int main(int argc, const char *argv[])
 
 				pos = 0;
 			} else if (recv_step == 1) {
-				int recv_length = recv(sockfd, &num_players, 1, 0);
+				int recv_length =
+					recv(sockfd, &num_players, 1, 0);
 				if (recv_length == 0) {
 					endwin();
 					fprintf(stderr, "Closed by server\n");
@@ -330,10 +361,11 @@ int main(int argc, const char *argv[])
 					recv_step = 0;
 				}
 			} else if (recv_step == 2) {
-				int recv_length = recv(sockfd,
-				     state_players,
-				     num_players * sizeof(struct state),
-				     0);
+				int recv_length =
+					recv(sockfd,
+					     state_players,
+					     num_players * sizeof(struct state),
+					     0);
 				if (recv_length == 0) {
 					endwin();
 					fprintf(stderr, "Closed by server\n");
@@ -358,9 +390,10 @@ int main(int argc, const char *argv[])
 			pos,
 			error,
 			count_errors,
+			count_slows,
 			last_back,
 			last_input,
-			start_time,
+			first_input,
 			state_players,
 			num_players,
 			text,

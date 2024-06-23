@@ -1,4 +1,4 @@
-CFLAGS = -g
+CFLAGS = -g -Wall -Wextra -Werror -Wpedantic
 LDFLAGS = `pkg-config --libs ncurses` `pkg-config --libs json-c`
 
 all: ttcli ttsrv
