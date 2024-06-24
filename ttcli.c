@@ -12,7 +12,7 @@
 
 #define AHEAD_SHOW 4
 #define AHEAD_HIDE 2
-#define WAIT_TIME 2000000000
+#define WAIT_TIME 1500000000
 #define MAX(a, b) ((a) < (b) ? (b) : (a))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
@@ -59,7 +59,7 @@ void print_text(
 		(last_input.tv_sec - first_input.tv_sec) +
 		(last_input.tv_nsec - first_input.tv_nsec) / 1000000000.0;
 
-	mvwprintw(win,  9, 24, "   WPM: %.0f",(pos / 5.0) / (elapsed / 60.0));
+	mvwprintw(win, 9, 24, "   WPM: %.0f", (pos / 5.0) / (elapsed / 60.0));
 	mvwprintw(win, 10, 24, "Errors: %d", count_errors);
 	mvwprintw(win, 11, 24, " Slows: %d", count_slows);
 	wrefresh(win);
@@ -122,33 +122,35 @@ void print_text(
 		int y = i / 58;
 		int x = i % 58;
 
+		int c = text[i] == ' ' ? '_' : text[i];
+
 		wattron(win, COLOR_PAIR(3));
 		if (i < spaces[current_word]) {
 			wattron(win, A_DIM);
-			mvwprintw(win, y, x, "%c", text[i]);
+			mvwprintw(win, y, x, "%c", c);
 			wattroff(win, A_DIM);
 		} else if (i < spaces[space_start]) {
 			if (error) {
 				wattron(win, COLOR_PAIR(4));
-				mvwprintw(win, y, x, "%c", text[i]);
+				mvwprintw(win, y, x, "%c", c);
 				wattroff(win, COLOR_PAIR(4));
 			} else if (diff_back < WAIT_TIME) {
 				wattron(win, A_BOLD);
-				mvwprintw(win, y, x, "%c", text[i]);
+				mvwprintw(win, y, x, "%c", c);
 				wattroff(win, A_BOLD);
 			} else if (diff_input < WAIT_TIME) {
 				mvwprintw(win, y, x, "_");
 			} else {
 				/* wattron(win, A_BOLD); */
-				mvwprintw(win, y, x, "%c", text[i]);
+				mvwprintw(win, y, x, "%c", c);
 				/* wattroff(win, A_BOLD); */
 			}
 		} else if (i < spaces[space_end]) {
 			wattron(win, A_BOLD);
-			mvwprintw(win, y, x, "%c", text[i]);
+			mvwprintw(win, y, x, "%c", c);
 			wattroff(win, A_BOLD);
 		} else {
-			mvwprintw(win, y, x, "%c", text[i]);
+			mvwprintw(win, y, x, "%c", c);
 		}
 		wattroff(win, COLOR_PAIR(3));
 	}
@@ -228,6 +230,9 @@ int main(int argc, const char *argv[])
 	char recv_step = 0;
 	char outdated = 0;
 
+	char header_type;
+	short header_length;
+
 	int pos;
 	int error;
 	int count_errors = 0;
@@ -250,7 +255,7 @@ int main(int argc, const char *argv[])
 		FD_ZERO(&writefds);
 		FD_SET(0, &readfds);
 		FD_SET(sockfd, &readfds);
-		if (outdated == 1 && recv_step == 0) {
+		if (outdated == 1) {
 			FD_SET(sockfd, &writefds);
 		}
 
@@ -258,7 +263,8 @@ int main(int argc, const char *argv[])
 		select(FD_SETSIZE, &readfds, &writefds, NULL, &select_timeout);
 
 		if (FD_ISSET(0, &readfds)) {
-			if (first_input.tv_sec == 0 && first_input.tv_nsec == 0) {
+			if (first_input.tv_sec == 0 &&
+			    first_input.tv_nsec == 0) {
 				clock_gettime(CLOCK_REALTIME, &first_input);
 			}
 
@@ -298,9 +304,11 @@ int main(int argc, const char *argv[])
 						1000000000 +
 					current.tv_nsec - last_input.tv_nsec;
 
-				if (pos < length && !error && diff_back > WAIT_TIME) {
+				if (pos < length && !error &&
+				    diff_back > WAIT_TIME) {
 					if (c == text[pos]) {
-						if (pos != 0 && diff_input > WAIT_TIME) {
+						if (pos != 0 &&
+						    diff_input > WAIT_TIME) {
 							count_slows++;
 						}
 						last_input = current;
@@ -315,64 +323,95 @@ int main(int argc, const char *argv[])
 		}
 
 		if (FD_ISSET(sockfd, &readfds)) {
-			if (recv_step == 0) {
-				memset(&last_back, 0, sizeof last_back);
-				memset(&last_input, 0, sizeof last_input);
-				memset(&first_input, 0, sizeof first_input);
-
-				error = 0;
-				count_errors = 0;
-				count_slows = 0;
-
-				length = recv(sockfd, text, 4096, 0);
-				if (length == 0) {
-					endwin();
-					fprintf(stderr, "Closed by server\n");
-					close(sockfd);
-					return 0;
+			int buffer_length;
+			void *buffer;
+			switch (recv_step) {
+			case 0:
+				// HEADER
+				buffer_length = 1;
+				buffer = &header_type;
+				break;
+			case 1:
+				// LENGTH
+				buffer_length = 2;
+				buffer = &header_length;
+				break;
+			case 2:
+				// MESSAGE
+				buffer_length = header_length;
+				if (header_type == 0) {
+					buffer = &text;
+				} else if (header_type == 1) {
+					buffer = &state_players;
 				}
-				text[length] = '\0';
+				break;
+			}
 
-				spaces[0] = -1;
-				num_spaces = 1;
-				for (int i = 0; i < length; i++) {
-					pos_to_word[i] = num_spaces - 1;
-					if (isspace(text[i])) {
-						spaces[num_spaces] = i + 1;
-						num_spaces++;
-					}
-				}
-				spaces[num_spaces] = length;
-				num_spaces++;
+			int recv_length =
+				recv(sockfd, buffer, buffer_length, 0);
 
-				pos = 0;
-			} else if (recv_step == 1) {
-				int recv_length =
-					recv(sockfd, &num_players, 1, 0);
-				if (recv_length == 0) {
-					endwin();
-					fprintf(stderr, "Closed by server\n");
-					close(sockfd);
-					return 0;
-				}
-				if (num_players != 0) {
-					recv_step = 2;
-				} else {
+			if (recv_length == 0) {
+				endwin();
+				fprintf(stderr, "Closed by server\n");
+				close(sockfd);
+				return 0;
+			}
+
+			switch (recv_step) {
+			case 0:
+				recv_step = 1;
+				break;
+			case 1:
+				if (header_length == 0) {
 					recv_step = 0;
+				} else {
+					recv_step = 2;
 				}
-			} else if (recv_step == 2) {
-				int recv_length =
-					recv(sockfd,
-					     state_players,
-					     num_players * sizeof(struct state),
-					     0);
-				if (recv_length == 0) {
-					endwin();
-					fprintf(stderr, "Closed by server\n");
-					close(sockfd);
-					return 0;
-				}
+				break;
+
+			case 2:
 				recv_step = 0;
+				if (header_type == 0) {
+					length = recv_length;
+					text[length] = '\0';
+
+					memset(&last_back, 0, sizeof last_back);
+					memset(&last_input,
+					       0,
+					       sizeof last_input);
+					memset(&first_input,
+					       0,
+					       sizeof first_input);
+
+					error = 0;
+					count_errors = 0;
+					count_slows = 0;
+
+					spaces[0] = -1;
+					num_spaces = 1;
+					for (int i = 0; i < length; i++) {
+						pos_to_word[i] = num_spaces - 1;
+						if (isspace(text[i])) {
+							spaces[num_spaces] =
+								i + 1;
+							num_spaces++;
+						}
+					}
+					spaces[num_spaces] = length;
+					num_spaces++;
+
+					pos = 0;
+					num_players = 0;
+				} else if (header_type == 1) {
+					num_players = header_length /
+						      (sizeof(struct state));
+					mvprintw(
+						20,
+						0,
+						"num_players = %d",
+						num_players);
+				}
+				break;
 			}
 		}
 
@@ -381,8 +420,8 @@ int main(int argc, const char *argv[])
 				.pos = pos,
 			};
 			send(sockfd, &state, sizeof state, 0);
-			recv_step = 1;
 			outdated = 0;
+			mvprintw(19, 0, "sent %d", pos);
 		}
 
 		print_text(

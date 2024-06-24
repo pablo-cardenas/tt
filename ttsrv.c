@@ -21,8 +21,7 @@ int main(int argc, const char *argv[])
 		return 1;
 	}
 
-	struct json_object *root =
-		json_object_from_file(argv[2]);
+	struct json_object *root = json_object_from_file(argv[2]);
 	if (!root) {
 		fprintf(stderr, "Failed to parse JSON file.\n");
 		return 1;
@@ -56,7 +55,6 @@ int main(int argc, const char *argv[])
 	FD_SET(sockfd, &set);
 
 	struct state states[FD_SETSIZE];
-	int length = 0;
 
 	while (1) {
 		fd_set readfds = set;
@@ -72,8 +70,11 @@ int main(int argc, const char *argv[])
 			if (!((*buffer != '\n' && *buffer != '\0') &&
 			      (*endptr == '\0' || *endptr == '\n'))) {
 				fprintf(stderr, "Error parsing quote index.\n");
-			} else if (!(0 <= quote_idx && quote_idx < num_quotes)) {
-				fprintf(stderr, "0 <= quote_index < %d.\n", num_quotes);
+			} else if (!(0 <= quote_idx &&
+				     quote_idx < num_quotes)) {
+				fprintf(stderr,
+					"0 <= quote_index < %d.\n",
+					num_quotes);
 			} else {
 				json_object *quote = json_object_array_get_idx(
 					quotes, quote_idx);
@@ -81,13 +82,15 @@ int main(int argc, const char *argv[])
 					quote, "text", &quote);
 				const char *str_quote =
 					json_object_get_string(quote);
-				length = strlen(str_quote);
+				short length = strlen(str_quote);
 				for (int i = 0; i < FD_SETSIZE; i++) {
 					states[i].pos = 0;
 					if (!(i != 0 && i != sockfd &&
 					      FD_ISSET(i, &set))) {
 						continue;
 					}
+					send(i, "\x00", 1, 0);
+					send(i, &length, sizeof length, 0);
 					send(i, str_quote, length, 0);
 				}
 			}
@@ -106,7 +109,8 @@ int main(int argc, const char *argv[])
 				continue;
 			}
 
-			int length = recv(fd, &states[fd], 16, 0);
+			int length =
+				recv(fd, &states[fd], sizeof(struct state), 0);
 			if (length == 0) {
 				states[fd].pos = 0;
 				printf("Disconnected\n");
@@ -114,20 +118,27 @@ int main(int argc, const char *argv[])
 				continue;
 			}
 
-			struct state buffer[FD_SETSIZE];
-			unsigned short buffer_size = 0;
-			for (int i = 0; i < FD_SETSIZE; i++) {
-				if (!(i != 0 && i != fd && i != sockfd &&
-				      FD_ISSET(i, &set))) {
+			for (int dest = 0; dest < FD_SETSIZE; dest++) {
+				if (!(dest != 0 && dest != fd &&
+				      dest != sockfd && FD_ISSET(dest, &set))) {
 					continue;
 				}
-				buffer[buffer_size++] = states[i];
+				struct state buffer[FD_SETSIZE];
+				unsigned short buffer_size = 0;
+				for (int i = 0; i < FD_SETSIZE; i++) {
+					if (!(i != 0 && i != dest &&
+					      i != sockfd &&
+					      FD_ISSET(i, &set))) {
+						continue;
+					}
+					buffer[buffer_size++] = states[i];
+				}
+				buffer_size *= sizeof(struct state);
+
+				send(dest, "\x01", 1, 0);
+				send(dest, &buffer_size, 2, 0);
+				send(dest, buffer, buffer_size, 0);
 			}
-			send(fd, &buffer_size, 1, 0);
-			send(fd,
-			     buffer,
-			     buffer_size * (sizeof(struct state)),
-			     0);
 		}
 	}
 	return 0;
