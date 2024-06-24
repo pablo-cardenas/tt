@@ -1,13 +1,35 @@
-CFLAGS = -g -Wall -Wextra -Werror -Wpedantic
-LDFLAGS = `pkg-config --libs ncurses` `pkg-config --libs json-c`
+.POSIX:
 
-all: ttcli ttsrv
+include config.mk
 
-ttcli.o: tt.h
+SRC = ttcli.c ttsrv.c
+OBJ = $(SRC:.c=.o)
+BIN = $(SRC:.c=)
 
-ttsrv.o: tt.h
+all: $(BIN)
+
+$(OBJ): tt.h config.mk
+
+.c.o:
+	$(CC) $(TTCFLAGS) -c $<
+
+.o:
+	$(CC) -o $@ $< $(TTLDFLAGS)
 
 clean: 
-	rm -f ttcli.o ttcli ttsrv.o ttsrv
+	rm -f $(OBJ) $(BIN) tt-$(VERSION).tar.gz
 
-.PHONY: all clean
+dist: clean
+	mkdir -p tt-$(VERSION)
+	cp -R README.md config.mk Makefile tt.h $(SRC) tt-$(VERSION)
+	tar -czf tt-$(VERSION).tar.gz tt-$(VERSION)
+	rm -rf tt-$(VERSION)
+
+install:
+	mkdir -p $(DESTDIR)$(PREFIX)/bin
+	install -m 755 $(BIN) $(DESTDIR)$(PREFIX)/bin
+
+uninstall:
+	cd $(DESTDIR)$(PREFIX)/bin; rm -f $(BIN)
+
+.PHONY: all clean dist install uninstall

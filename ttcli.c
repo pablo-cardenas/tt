@@ -62,7 +62,6 @@ void print_text(
 	mvwprintw(win, 9, 24, "   WPM: %.0f", (pos / 5.0) / (elapsed / 60.0));
 	mvwprintw(win, 10, 24, "Errors: %d", count_errors);
 	mvwprintw(win, 11, 24, " Slows: %d", count_slows);
-	wrefresh(win);
 
 	struct timespec current;
 	clock_gettime(CLOCK_REALTIME, &current);
@@ -259,7 +258,7 @@ int main(int argc, const char *argv[])
 			FD_SET(sockfd, &writefds);
 		}
 
-		struct timeval select_timeout = {1, 500000};
+		struct timeval select_timeout = {1, 200000};
 		select(FD_SETSIZE, &readfds, &writefds, NULL, &select_timeout);
 
 		if (FD_ISSET(0, &readfds)) {
@@ -327,7 +326,7 @@ int main(int argc, const char *argv[])
 			void *buffer;
 			switch (recv_step) {
 			case 0:
-				// HEADER
+				// TYPE
 				buffer_length = 1;
 				buffer = &header_type;
 				break;
@@ -359,9 +358,11 @@ int main(int argc, const char *argv[])
 
 			switch (recv_step) {
 			case 0:
+				// MESSAGE
 				recv_step = 1;
 				break;
 			case 1:
+				// LENGTH
 				if (header_length == 0) {
 					recv_step = 0;
 				} else {
@@ -370,6 +371,7 @@ int main(int argc, const char *argv[])
 				break;
 
 			case 2:
+				// MESSAGE
 				recv_step = 0;
 				if (header_type == 0) {
 					length = recv_length;
@@ -405,11 +407,6 @@ int main(int argc, const char *argv[])
 				} else if (header_type == 1) {
 					num_players = header_length /
 						      (sizeof(struct state));
-					mvprintw(
-						20,
-						0,
-						"num_players = %d",
-						num_players);
 				}
 				break;
 			}
@@ -421,7 +418,6 @@ int main(int argc, const char *argv[])
 			};
 			send(sockfd, &state, sizeof state, 0);
 			outdated = 0;
-			mvprintw(19, 0, "sent %d", pos);
 		}
 
 		print_text(

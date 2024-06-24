@@ -1,5 +1,5 @@
 #include "tt.h"
-#include <json-c/json.h>
+#include <json.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
