@@ -54,7 +54,7 @@ void print_text(
 	short *spaces,
 	short num_spaces)
 {
-	wclear(win);
+	werase(win);
 	float elapsed =
 		(last_input.tv_sec - first_input.tv_sec) +
 		(last_input.tv_nsec - first_input.tv_nsec) / 1000000000.0;
