@@ -7,6 +7,28 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+int change_quote(
+	int quote_idx,
+	struct json_object *quotes,
+	struct state states[FD_SETSIZE],
+	int sockfd,
+	fd_set set)
+{
+	json_object *quote = json_object_array_get_idx(quotes, quote_idx);
+	json_object_object_get_ex(quote, "text", &quote);
+	const char *str_quote = json_object_get_string(quote);
+	short length = strlen(str_quote);
+	for (int i = 0; i < FD_SETSIZE; i++) {
+		states[i].pos = 0;
+		if (!(i != 0 && i != sockfd && FD_ISSET(i, &set))) {
+			continue;
+		}
+		send(i, "\x00", 1, 0);
+		send(i, &length, sizeof length, 0);
+		send(i, str_quote, length, 0);
+	}
+}
+
 int main(int argc, const char *argv[])
 {
 	if (argc != 3) {
@@ -76,23 +98,8 @@ int main(int argc, const char *argv[])
 					"0 <= quote_index < %d.\n",
 					num_quotes);
 			} else {
-				json_object *quote = json_object_array_get_idx(
-					quotes, quote_idx);
-				json_object_object_get_ex(
-					quote, "text", &quote);
-				const char *str_quote =
-					json_object_get_string(quote);
-				short length = strlen(str_quote);
-				for (int i = 0; i < FD_SETSIZE; i++) {
-					states[i].pos = 0;
-					if (!(i != 0 && i != sockfd &&
-					      FD_ISSET(i, &set))) {
-						continue;
-					}
-					send(i, "\x00", 1, 0);
-					send(i, &length, sizeof length, 0);
-					send(i, str_quote, length, 0);
-				}
+				change_quote(
+					quote_idx, quotes, states, sockfd, set);
 			}
 		}
 
@@ -109,8 +116,13 @@ int main(int argc, const char *argv[])
 				continue;
 			}
 
-			int length =
-				recv(fd, &states[fd], sizeof(struct state), 0);
+			struct {
+				char type;
+				unsigned int number;
+			} message;
+
+			int length = recv(fd, &message, 1 + sizeof(int), 0);
+
 			if (length == 0) {
 				states[fd].pos = 0;
 				printf("Disconnected\n");
@@ -118,26 +130,37 @@ int main(int argc, const char *argv[])
 				continue;
 			}
 
-			for (int dest = 0; dest < FD_SETSIZE; dest++) {
-				if (!(dest != 0 && dest != fd &&
-				      dest != sockfd && FD_ISSET(dest, &set))) {
-					continue;
-				}
-				struct state buffer[FD_SETSIZE];
-				unsigned short buffer_size = 0;
-				for (int i = 0; i < FD_SETSIZE; i++) {
-					if (!(i != 0 && i != dest &&
-					      i != sockfd &&
-					      FD_ISSET(i, &set))) {
+			if (message.type == 0) {
+				states[fd].pos = message.number;
+				for (int dest = 0; dest < FD_SETSIZE; dest++) {
+					if (!(dest != 0 && dest != fd &&
+					      dest != sockfd &&
+					      FD_ISSET(dest, &set))) {
 						continue;
 					}
-					buffer[buffer_size++] = states[i];
-				}
-				buffer_size *= sizeof(struct state);
+					struct state buffer[FD_SETSIZE];
+					unsigned short buffer_size = 0;
+					for (int i = 0; i < FD_SETSIZE; i++) {
+						if (!(i != 0 && i != dest &&
+						      i != sockfd &&
+						      FD_ISSET(i, &set))) {
+							continue;
+						}
+						buffer[buffer_size++] =
+							states[i];
+					}
+					buffer_size *= sizeof(struct state);
 
-				send(dest, "\x01", 1, 0);
-				send(dest, &buffer_size, 2, 0);
-				send(dest, buffer, buffer_size, 0);
+					send(dest, "\x01", 1, 0);
+					send(dest, &buffer_size, 2, 0);
+					send(dest, buffer, buffer_size, 0);
+				}
+			}
+
+			if (message.type == 1) {
+				int quote_idx = message.number;
+				change_quote(
+					quote_idx, quotes, states, sockfd, set);
 			}
 		}
 	}

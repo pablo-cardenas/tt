@@ -1,5 +1,5 @@
 #pragma once
 
 struct state {
-	unsigned short pos;
+	unsigned int pos;
 };

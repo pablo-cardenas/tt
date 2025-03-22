@@ -228,6 +228,7 @@ int main(int argc, const char *argv[])
 	 */
 	char recv_step = 0;
 	char outdated = 0;
+	int new_quote = -1;
 
 	char header_type;
 	short header_length;
@@ -248,13 +249,15 @@ int main(int argc, const char *argv[])
 	struct timespec last_input = {0, 0};
 	struct timespec first_input = {0, 0};
 
+	srand(time(NULL));
+
 	while (1) {
 		fd_set readfds, writefds;
 		FD_ZERO(&readfds);
 		FD_ZERO(&writefds);
 		FD_SET(0, &readfds);
 		FD_SET(sockfd, &readfds);
-		if (outdated == 1) {
+		if (outdated || new_quote >= 0) {
 			FD_SET(sockfd, &writefds);
 		}
 
@@ -270,6 +273,8 @@ int main(int argc, const char *argv[])
 			int c = getch();
 
 			if (c == ERR) {
+			} else if (c == '\n') {
+				new_quote = rand() % 6357;
 			} else if (c == 0x1b) {
 				c = getch();
 				if (c == '\b' || c == 0x7f) {
@@ -413,11 +418,28 @@ int main(int argc, const char *argv[])
 		}
 
 		if (FD_ISSET(sockfd, &writefds)) {
-			struct state state = {
-				.pos = pos,
-			};
-			send(sockfd, &state, sizeof state, 0);
-			outdated = 0;
+			if (new_quote >= 0) {
+				struct {
+					char type;
+					unsigned int new_quote;
+				} message = {
+					.type = 1,
+					.new_quote = new_quote,
+				};
+				send(sockfd, &message, sizeof message, 0);
+				new_quote = -1;
+				outdated = 0;
+			} else if (outdated) {
+				struct {
+					char type;
+					struct state state;
+				} message = {
+					.type = 0,
+					.state.pos = pos,
+				};
+				send(sockfd, &message, sizeof message, 0);
+				outdated = 0;
+			}
 		}
 
 		print_text(
