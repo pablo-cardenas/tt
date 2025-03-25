@@ -12,7 +12,7 @@
 
 #define AHEAD_SHOW 4
 #define AHEAD_HIDE 2
-#define WAIT_TIME 1500000000
+#define WAIT_TIME 1000000000
 #define MAX(a, b) ((a) < (b) ? (b) : (a))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
