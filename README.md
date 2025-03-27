@@ -45,7 +45,7 @@ running the server and client on the same machine, you can use `127.0.0.1` as
 the host.
 
 ```sh
-./ttcli <host> <port>
+ttcli <host> <port>
 ```
 
 In the client, press `Enter` to start the game.
